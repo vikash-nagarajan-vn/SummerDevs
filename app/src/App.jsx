@@ -613,26 +613,17 @@ function ShareCard({ state, applyJoin }) {
   return (
     <section className="card stack">
       <h2>Share this carpool</h2>
-      <p className="muted">
-        Send this link to anyone you want in the carpool. Opening it loads the same people, times,
-        and schedule on their device.
-      </p>
+      <p className="muted">Share the join code with anyone who should be added to this carpool.</p>
       <div className="share-row">
         <input
           className="share-link"
           readOnly
-          value={link}
+          value={makeShareCode(state)}
           onFocus={(event) => event.target.select()}
         />
-        <button type="button" className="btn sm" onClick={() => copy(link, 'link')}>
-          {copied === 'link' ? 'Copied' : 'Copy link'}
-        </button>
-      </div>
-      <div className="row-between">
-        <span className="muted">Prefer a code? Copy just the invite code.</span>
         <button
           type="button"
-          className="btn ghost sm"
+          className="btn sm"
           onClick={() => copy(makeShareCode(state), 'code')}
         >
           {copied === 'code' ? 'Copied' : 'Copy join code'}
@@ -642,10 +633,10 @@ function ShareCard({ state, applyJoin }) {
       <hr className="divider" />
 
       <h3>Join a carpool</h3>
-      <p className="muted">Paste an invite link or code someone sent you.</p>
+      <p className="muted">Paste a join code someone shared with you.</p>
       <form className="addrow" onSubmit={submitJoin}>
         <input
-          placeholder="Paste invite link or code"
+          placeholder="Paste join code"
           value={joinValue}
           onChange={(event) => setJoinValue(event.target.value)}
         />
