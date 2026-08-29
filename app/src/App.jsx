@@ -258,7 +258,8 @@ function TopNav({ route, navigate }) {
         onClick={() => navigate('home')}
         aria-label="TANDEM home"
       >
-        <img src={LOGO} alt="TANDEM" className="brand-mark" />
+        <img src={LOGO} alt="" className="brand-mark" />
+        <span className="brand-word">TANDEM</span>
       </button>
       <nav className="navlinks">
         {tabs.map((tab) => (
