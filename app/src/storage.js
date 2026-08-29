@@ -1,4 +1,7 @@
+import { makeShareCode } from './share'
+
 const KEY = 'tandem.v1'
+const SYNC_CHANNEL = 'tandem.sync.v1'
 
 export const uid = () => {
   if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
@@ -72,4 +75,64 @@ export const saveState = (state) => {
   } catch {
     // storage unavailable (private mode, quota). The app still works in memory.
   }
+}
+
+export const getSyncRoom = (state) => {
+  const code = makeShareCode(state)
+  return code ? `tandem.room.${code}` : null
+}
+
+export const publishSyncState = (state) => {
+  const room = getSyncRoom(state)
+  if (!room) return
+
+  const payload = { at: Date.now(), state }
+  try {
+    localStorage.setItem(room, JSON.stringify(payload))
+  } catch {
+    // ignore storage quota issues; sync still works in memory for the current tab
+  }
+
+  try {
+    const channel = new BroadcastChannel(SYNC_CHANNEL)
+    channel.postMessage({ room, ...payload })
+    channel.close()
+  } catch {
+    // BroadcastChannel may not be available in some browser contexts
+  }
+}
+
+export const subscribeToSync = (onSync) => {
+  if (!('BroadcastChannel' in globalThis) && !('addEventListener' in window)) {
+    return () => {}
+  }
+
+  const handleStorage = (event) => {
+    if (!event.key || !event.key.startsWith('tandem.room.')) return
+    try {
+      const payload = JSON.parse(event.newValue || 'null')
+      if (payload && payload.state) onSync(payload.state)
+    } catch {
+      // ignore malformed sync payloads
+    }
+  }
+
+  const handleMessage = (event) => {
+    if (!event.data || !event.data.room || !event.data.state) return
+    onSync(event.data.state)
+  }
+
+  if ('BroadcastChannel' in globalThis) {
+    const channel = new BroadcastChannel(SYNC_CHANNEL)
+    channel.addEventListener('message', handleMessage)
+    window.addEventListener('storage', handleStorage)
+    return () => {
+      window.removeEventListener('storage', handleStorage)
+      channel.removeEventListener('message', handleMessage)
+      channel.close()
+    }
+  }
+
+  window.addEventListener('storage', handleStorage)
+  return () => window.removeEventListener('storage', handleStorage)
 }

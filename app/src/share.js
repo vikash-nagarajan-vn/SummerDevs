@@ -17,6 +17,7 @@ const fromBase64Url = (value) => {
 }
 
 export const makeShareCode = (state) => {
+  if (!state || typeof state !== 'object') return ''
   const payload = {
     v: 1,
     people: state.people,

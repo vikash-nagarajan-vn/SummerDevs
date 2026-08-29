@@ -1,7 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import { loadState, saveState, defaultState, normalizeEntries, uid } from './storage'
-import { makeShareLink, makeShareCode, parseShareInput } from './share'
+import {
+  loadState,
+  saveState,
+  defaultState,
+  normalizeEntries,
+  uid,
+  publishSyncState,
+  subscribeToSync,
+} from './storage'
+import { makeShareCode, makeShareLink, parseShareInput } from './share'
 import {
   toKey,
   fromKey,
@@ -36,9 +44,25 @@ export default function App() {
     state.onboarded ? { name: 'home', params: {} } : { name: 'onboarding', params: { step: 0 } },
   )
   const [pendingJoin, setPendingJoin] = useState(null)
+  const lastSyncedRef = useRef('')
 
   useEffect(() => {
     saveState(state)
+    publishSyncState(state)
+  }, [state])
+
+  useEffect(() => {
+    const stop = subscribeToSync((incoming) => {
+      if (!incoming) return
+      const currentCode = makeShareCode(state)
+      const incomingCode = makeShareCode(incoming)
+      if (!incomingCode || incomingCode !== currentCode) return
+      const incomingKey = JSON.stringify(incoming)
+      if (incomingKey === lastSyncedRef.current) return
+      lastSyncedRef.current = incomingKey
+      setState(incoming)
+    })
+    return stop
   }, [state])
 
   useEffect(() => {
