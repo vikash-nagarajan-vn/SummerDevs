@@ -4,19 +4,14 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"node server.js\" \"vite --host 0.0.0.0\"",
-    "server": "node server.js",
+    "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
-    "concurrently": "^9.2.0",
-    "express": "^5.1.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "socket.io": "^4.8.1",
-    "socket.io-client": "^4.8.1"
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
     "@types/react": "^19.2.18",

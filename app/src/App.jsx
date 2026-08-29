@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { io } from 'socket.io-client'
 import './App.css'
 import {
   loadState,
@@ -7,7 +6,12 @@ import {
   defaultState,
   normalizeEntries,
   uid,
+<<<<<<< HEAD
   generateRoomCode,
+=======
+  publishSyncState,
+  subscribeToSync,
+>>>>>>> parent of be897a5 (v8)
 } from './storage'
 import { makeShareCode, makeShareLink, parseShareInput } from './share'
 import {
@@ -44,14 +48,20 @@ export default function App() {
     state.onboarded ? { name: 'home', params: {} } : { name: 'onboarding', params: { step: 0 } },
   )
   const [pendingJoin, setPendingJoin] = useState(null)
+<<<<<<< HEAD
   const socketRef = useRef(null)
   const lastBroadcastRef = useRef('')
+=======
+  const lastSyncedRef = useRef('')
+>>>>>>> parent of be897a5 (v8)
 
   useEffect(() => {
     saveState(state)
+    publishSyncState(state)
   }, [state])
 
   useEffect(() => {
+<<<<<<< HEAD
     const roomCode = state.roomCode || generateRoomCode()
     if (!state.roomCode) {
       setState((current) => ({ ...current, roomCode }))
@@ -100,6 +110,19 @@ export default function App() {
 
     lastBroadcastRef.current = payloadValue
     socket.emit('state:update', { code: state.roomCode, state: payload })
+=======
+    const stop = subscribeToSync((incoming) => {
+      if (!incoming) return
+      const currentCode = makeShareCode(state)
+      const incomingCode = makeShareCode(incoming)
+      if (!incomingCode || incomingCode !== currentCode) return
+      const incomingKey = JSON.stringify(incoming)
+      if (incomingKey === lastSyncedRef.current) return
+      lastSyncedRef.current = incomingKey
+      setState(incoming)
+    })
+    return stop
+>>>>>>> parent of be897a5 (v8)
   }, [state])
 
   useEffect(() => {
