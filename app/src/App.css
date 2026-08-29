@@ -382,19 +382,56 @@ input:focus-visible,
 /* ---------- hub / home ---------- */
 .hub-hero {
   display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-.hub-mark {
-  width: 88px;
-  height: 88px;
-  border-radius: 22px;
-  box-shadow: 0 16px 40px rgba(59, 130, 246, 0.32);
+  flex-direction: column;
+  gap: 4px;
 }
 
 .hub-hero h1 {
-  margin: 0 0 2px;
+  margin: 0;
+}
+
+.share-row {
+  display: flex;
+  gap: 10px;
+}
+
+.share-link {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.divider {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 4px 0;
+  width: 100%;
+}
+
+.error-text {
+  color: var(--danger);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.join-summary {
+  display: flex;
+  gap: 24px;
+}
+
+.join-summary div {
+  display: flex;
+  flex-direction: column;
+}
+
+.join-summary strong {
+  font-size: 1.35rem;
+}
+
+.join-summary span {
+  font-size: 0.8rem;
+  color: var(--muted);
 }
 
 .tiles {
@@ -658,16 +695,6 @@ input:focus-visible,
 @media (max-width: 640px) {
   .page {
     padding: 20px 14px 60px;
-  }
-
-  .hub-hero {
-    gap: 14px;
-  }
-
-  .hub-mark {
-    width: 64px;
-    height: 64px;
-    border-radius: 16px;
   }
 
   .cal-grid {

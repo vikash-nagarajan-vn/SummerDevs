@@ -45,17 +45,21 @@ const migrateEntry = (entry) => {
   return result
 }
 
+export const normalizeEntries = (raw) => {
+  const entries = {}
+  for (const [key, entry] of Object.entries(raw || {})) {
+    const migrated = migrateEntry(entry)
+    if (migrated.pickups.length || migrated.dropoffs.length) entries[key] = migrated
+  }
+  return entries
+}
+
 export const loadState = () => {
   try {
     const raw = localStorage.getItem(KEY)
     if (!raw) return { ...defaultState }
     const merged = { ...defaultState, ...JSON.parse(raw) }
-    const entries = {}
-    for (const [key, entry] of Object.entries(merged.entries || {})) {
-      const migrated = migrateEntry(entry)
-      if (migrated.pickups.length || migrated.dropoffs.length) entries[key] = migrated
-    }
-    merged.entries = entries
+    merged.entries = normalizeEntries(merged.entries)
     return merged
   } catch {
     return { ...defaultState }

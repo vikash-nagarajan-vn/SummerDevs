@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { loadState, saveState, defaultState, uid } from './storage'
+import { loadState, saveState, defaultState, normalizeEntries, uid } from './storage'
+import { makeShareLink, makeShareCode, parseShareInput } from './share'
 import {
   toKey,
   fromKey,
@@ -34,6 +35,7 @@ export default function App() {
   const [route, setRoute] = useState(() =>
     state.onboarded ? { name: 'home', params: {} } : { name: 'onboarding', params: { step: 0 } },
   )
+  const [pendingJoin, setPendingJoin] = useState(null)
 
   useEffect(() => {
     saveState(state)
@@ -46,6 +48,55 @@ export default function App() {
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
+
+  useEffect(() => {
+    const checkHash = () => {
+      if (!window.location.hash.startsWith('#join=')) return
+      const data = parseShareInput(window.location.hash)
+      if (data) {
+        setPendingJoin(data)
+        setRoute({ name: 'join', params: {} })
+      }
+    }
+    checkHash()
+    window.addEventListener('hashchange', checkHash)
+    return () => window.removeEventListener('hashchange', checkHash)
+  }, [])
+
+  const clearHash = () => {
+    window.history.replaceState(
+      window.history.state,
+      '',
+      window.location.pathname + window.location.search,
+    )
+  }
+
+  const applyJoin = (data) => {
+    setState((current) => ({
+      ...current,
+      people: Array.isArray(data.people) ? data.people : current.people,
+      pickupTimes: Array.isArray(data.pickupTimes) ? data.pickupTimes : current.pickupTimes,
+      dropoffTimes: Array.isArray(data.dropoffTimes) ? data.dropoffTimes : current.dropoffTimes,
+      allowedWeekdays: Array.isArray(data.allowedWeekdays)
+        ? data.allowedWeekdays
+        : current.allowedWeekdays,
+      entries: normalizeEntries(data.entries),
+      onboarded: true,
+    }))
+    clearHash()
+    setPendingJoin(null)
+    navigate('home')
+  }
+
+  const cancelJoin = () => {
+    clearHash()
+    setPendingJoin(null)
+    setRoute(
+      state.onboarded
+        ? { name: 'home', params: {} }
+        : { name: 'onboarding', params: { step: 0 } },
+    )
+  }
 
   const navigate = (name, params = {}) => {
     const next = { name, params }
@@ -159,6 +210,7 @@ export default function App() {
     route,
     navigate,
     patch,
+    applyJoin,
     addRide,
     removeRide,
     setRideTime,
@@ -171,11 +223,16 @@ export default function App() {
     toggleWeekday,
   }
 
+  const chromeless = route.name === 'onboarding' || route.name === 'join'
+
   return (
     <div className="app">
-      {route.name !== 'onboarding' && <TopNav route={route} navigate={navigate} />}
+      {!chromeless && <TopNav route={route} navigate={navigate} />}
       <main className="page">
         {route.name === 'onboarding' && <Onboarding {...shared} />}
+        {route.name === 'join' && (
+          <JoinInvite pendingJoin={pendingJoin} applyJoin={applyJoin} cancelJoin={cancelJoin} />
+        )}
         {route.name === 'home' && <Hub {...shared} />}
         {route.name === 'calendar' && <Calendar {...shared} />}
         {route.name === 'date' && <DateDetail {...shared} dateKey={route.params.key} />}
@@ -423,7 +480,7 @@ function Onboarding({ state, route, navigate, patch, addPerson, removePerson, se
   )
 }
 
-function Hub({ state, navigate }) {
+function Hub({ state, navigate, applyJoin }) {
   const upcoming = useMemo(() => {
     const now = new Date()
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
@@ -441,15 +498,12 @@ function Hub({ state, navigate }) {
   return (
     <div className="stack lg">
       <div className="hub-hero">
-        <img src={LOGO} alt="TANDEM" className="hub-mark" />
-        <div>
-          <h1>Your carpool</h1>
-          <p className="muted">
-            {state.people.length
-              ? `${state.people.length} ${state.people.length === 1 ? 'driver' : 'drivers'} ready to schedule.`
-              : 'Add drivers and times to get started.'}
-          </p>
-        </div>
+        <h1>Your carpool</h1>
+        <p className="muted">
+          {state.people.length
+            ? `${state.people.length} ${state.people.length === 1 ? 'driver' : 'drivers'} ready to schedule.`
+            : 'Add drivers and times to get started.'}
+        </p>
       </div>
 
       <div className="tiles">
@@ -514,6 +568,133 @@ function Hub({ state, navigate }) {
             ))}
           </ul>
         )}
+      </section>
+
+      <ShareCard state={state} applyJoin={applyJoin} />
+    </div>
+  )
+}
+
+function ShareCard({ state, applyJoin }) {
+  const link = useMemo(() => makeShareLink(state), [state])
+  const [copied, setCopied] = useState('')
+  const [joinValue, setJoinValue] = useState('')
+  const [error, setError] = useState('')
+
+  const copy = async (text, tag) => {
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      // clipboard blocked; the value is selectable in the field instead
+    }
+    setCopied(tag)
+    window.setTimeout(() => setCopied(''), 1500)
+  }
+
+  const submitJoin = (event) => {
+    event.preventDefault()
+    const data = parseShareInput(joinValue)
+    if (!data) {
+      setError('That link or code did not work. Check it and try again.')
+      return
+    }
+    if (
+      !window.confirm(
+        'Joining replaces the people, times, and schedule on this device. Continue?',
+      )
+    ) {
+      return
+    }
+    setError('')
+    setJoinValue('')
+    applyJoin(data)
+  }
+
+  return (
+    <section className="card stack">
+      <h2>Share this carpool</h2>
+      <p className="muted">
+        Send this link to anyone you want in the carpool. Opening it loads the same people, times,
+        and schedule on their device.
+      </p>
+      <div className="share-row">
+        <input
+          className="share-link"
+          readOnly
+          value={link}
+          onFocus={(event) => event.target.select()}
+        />
+        <button type="button" className="btn sm" onClick={() => copy(link, 'link')}>
+          {copied === 'link' ? 'Copied' : 'Copy link'}
+        </button>
+      </div>
+      <div className="row-between">
+        <span className="muted">Prefer a code? Copy just the invite code.</span>
+        <button
+          type="button"
+          className="btn ghost sm"
+          onClick={() => copy(makeShareCode(state), 'code')}
+        >
+          {copied === 'code' ? 'Copied' : 'Copy join code'}
+        </button>
+      </div>
+
+      <hr className="divider" />
+
+      <h3>Join a carpool</h3>
+      <p className="muted">Paste an invite link or code someone sent you.</p>
+      <form className="addrow" onSubmit={submitJoin}>
+        <input
+          placeholder="Paste invite link or code"
+          value={joinValue}
+          onChange={(event) => setJoinValue(event.target.value)}
+        />
+        <button type="submit" className="btn">
+          Join
+        </button>
+      </form>
+      {error && <p className="error-text">{error}</p>}
+    </section>
+  )
+}
+
+function JoinInvite({ pendingJoin, applyJoin, cancelJoin }) {
+  const data = pendingJoin || {}
+  const times = (data.pickupTimes?.length || 0) + (data.dropoffTimes?.length || 0)
+  const days = Object.keys(data.entries || {}).length
+
+  return (
+    <div className="onboard">
+      <div className="onboard-head">
+        <img src={LOGO} alt="TANDEM" className="onboard-mark" />
+        <h1>Join this carpool?</h1>
+        <p className="muted">Someone shared their TANDEM carpool with you.</p>
+      </div>
+      <section className="card stack">
+        <div className="join-summary">
+          <div>
+            <strong>{data.people?.length || 0}</strong>
+            <span>drivers</span>
+          </div>
+          <div>
+            <strong>{times}</strong>
+            <span>saved times</span>
+          </div>
+          <div>
+            <strong>{days}</strong>
+            <span>scheduled days</span>
+          </div>
+        </div>
+        {data.people?.length > 0 && <p className="muted">Drivers: {data.people.join(', ')}</p>}
+        <p className="muted">Joining replaces the carpool currently on this device.</p>
+        <div className="row-between">
+          <button type="button" className="btn ghost" onClick={cancelJoin}>
+            Not now
+          </button>
+          <button type="button" className="btn" onClick={() => applyJoin(data)}>
+            Join carpool
+          </button>
+        </div>
       </section>
     </div>
   )
