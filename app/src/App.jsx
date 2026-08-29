@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { io } from 'socket.io-client'
 import './App.css'
 import {
   loadState,
@@ -6,8 +7,6 @@ import {
   defaultState,
   normalizeEntries,
   uid,
-  publishSyncState,
-  subscribeToSync,
 } from './storage'
 import { makeShareCode, makeShareLink, parseShareInput } from './share'
 import {
@@ -44,25 +43,49 @@ export default function App() {
     state.onboarded ? { name: 'home', params: {} } : { name: 'onboarding', params: { step: 0 } },
   )
   const [pendingJoin, setPendingJoin] = useState(null)
-  const lastSyncedRef = useRef('')
+  const socketRef = useRef(null)
+  const lastCodeRef = useRef('')
 
   useEffect(() => {
     saveState(state)
-    publishSyncState(state)
   }, [state])
 
   useEffect(() => {
-    const stop = subscribeToSync((incoming) => {
-      if (!incoming) return
-      const currentCode = makeShareCode(state)
+    const code = makeShareCode(state)
+    if (!code) return
+
+    if (!socketRef.current) {
+      socketRef.current = io('http://localhost:3001', { transports: ['websocket'] })
+    }
+
+    const socket = socketRef.current
+    const room = code
+    lastCodeRef.current = room
+    socket.emit('join-room', room)
+
+    socket.on('state:update', (incoming) => {
       const incomingCode = makeShareCode(incoming)
-      if (!incomingCode || incomingCode !== currentCode) return
-      const incomingKey = JSON.stringify(incoming)
-      if (incomingKey === lastSyncedRef.current) return
-      lastSyncedRef.current = incomingKey
-      setState(incoming)
+      if (!incomingCode || incomingCode !== code) return
+      setState((current) => {
+        const next = JSON.stringify(current)
+        const incomingValue = JSON.stringify(incoming)
+        return next === incomingValue ? current : incoming
+      })
     })
-    return stop
+
+    return () => {
+      socket.off('state:update')
+    }
+  }, [state])
+
+  useEffect(() => {
+    const socket = socketRef.current
+    if (!socket) return
+
+    const code = makeShareCode(state)
+    if (!code) return
+
+    socket.emit('state:update', { code, state })
   }, [state])
 
   useEffect(() => {
