@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { loadState, saveState, defaultState } from './storage'
+import { loadState, saveState, defaultState, uid } from './storage'
 import {
   toKey,
   fromKey,
@@ -17,20 +17,17 @@ import {
 const LOGO = '/tandem-logo.svg'
 
 const RIDES = [
-  { key: 'pickup', label: 'Pickup', glyph: '↑' },
-  { key: 'dropoff', label: 'Drop-off', glyph: '↓' },
+  { key: 'pickups', label: 'Pickup', glyph: '↑', timesField: 'pickupTimes' },
+  { key: 'dropoffs', label: 'Drop-off', glyph: '↓', timesField: 'dropoffTimes' },
 ]
 
-const emptyEntry = () => ({
-  pickup: { time: '', drivers: [] },
-  dropoff: { time: '', drivers: [] },
-})
-
-const isEmptyEntry = (e) =>
-  !e.pickup.time &&
-  !e.dropoff.time &&
-  e.pickup.drivers.length === 0 &&
-  e.dropoff.drivers.length === 0
+const emptyEntry = () => ({ pickups: [], dropoffs: [] })
+const isEmptyEntry = (e) => e.pickups.length === 0 && e.dropoffs.length === 0
+const usefulSlots = (entry) =>
+  [
+    ...entry.pickups.map((slot) => ({ ...slot, glyph: '↑' })),
+    ...entry.dropoffs.map((slot) => ({ ...slot, glyph: '↓' })),
+  ].filter((slot) => slot.time || slot.drivers.length)
 
 export default function App() {
   const [state, setState] = useState(loadState)
@@ -63,8 +60,8 @@ export default function App() {
     setState((current) => {
       const source = current.entries[key] || emptyEntry()
       const draft = {
-        pickup: { time: source.pickup.time, drivers: [...source.pickup.drivers] },
-        dropoff: { time: source.dropoff.time, drivers: [...source.dropoff.drivers] },
+        pickups: source.pickups.map((slot) => ({ ...slot, drivers: [...slot.drivers] })),
+        dropoffs: source.dropoffs.map((slot) => ({ ...slot, drivers: [...slot.drivers] })),
       }
       const next = updater(draft)
       const entries = { ...current.entries }
@@ -74,19 +71,49 @@ export default function App() {
     })
   }
 
-  const toggleDriver = (key, ride, person) =>
+  const addRide = (key, field) =>
     updateEntry(key, (draft) => {
-      const list = draft[ride].drivers
-      draft[ride].drivers = list.includes(person)
-        ? list.filter((name) => name !== person)
-        : [...list, person]
+      draft[field] = [...draft[field], { id: uid(), time: '', drivers: [] }]
       return draft
     })
 
-  const setRideTime = (key, ride, time) =>
+  const removeRide = (key, field, id) =>
     updateEntry(key, (draft) => {
-      draft[ride].time = time
+      draft[field] = draft[field].filter((slot) => slot.id !== id)
       return draft
+    })
+
+  const setRideTime = (key, field, id, time) =>
+    updateEntry(key, (draft) => {
+      draft[field] = draft[field].map((slot) => (slot.id === id ? { ...slot, time } : slot))
+      return draft
+    })
+
+  const toggleDriver = (key, field, id, person) =>
+    updateEntry(key, (draft) => {
+      draft[field] = draft[field].map((slot) => {
+        if (slot.id !== id) return slot
+        const has = slot.drivers.includes(person)
+        return {
+          ...slot,
+          drivers: has ? slot.drivers.filter((n) => n !== person) : [...slot.drivers, person],
+        }
+      })
+      return draft
+    })
+
+  const pruneDay = (key) =>
+    setState((current) => {
+      const entry = current.entries[key]
+      if (!entry) return current
+      const clean = {
+        pickups: entry.pickups.filter((slot) => slot.time || slot.drivers.length),
+        dropoffs: entry.dropoffs.filter((slot) => slot.time || slot.drivers.length),
+      }
+      const entries = { ...current.entries }
+      if (!clean.pickups.length && !clean.dropoffs.length) delete entries[key]
+      else entries[key] = clean
+      return { ...current, entries }
     })
 
   const clearDay = (key) =>
@@ -108,18 +135,11 @@ export default function App() {
 
   const removePerson = (name) =>
     setState((current) => {
+      const strip = (slots) =>
+        slots.map((slot) => ({ ...slot, drivers: slot.drivers.filter((d) => d !== name) }))
       const entries = {}
       for (const [key, entry] of Object.entries(current.entries)) {
-        entries[key] = {
-          pickup: {
-            time: entry.pickup.time,
-            drivers: entry.pickup.drivers.filter((driver) => driver !== name),
-          },
-          dropoff: {
-            time: entry.dropoff.time,
-            drivers: entry.dropoff.drivers.filter((driver) => driver !== name),
-          },
-        }
+        entries[key] = { pickups: strip(entry.pickups), dropoffs: strip(entry.dropoffs) }
       }
       return { ...current, people: current.people.filter((p) => p !== name), entries }
     })
@@ -139,8 +159,11 @@ export default function App() {
     route,
     navigate,
     patch,
-    toggleDriver,
+    addRide,
+    removeRide,
     setRideTime,
+    toggleDriver,
+    pruneDay,
     clearDay,
     addPerson,
     removePerson,
@@ -153,7 +176,8 @@ export default function App() {
       {route.name !== 'onboarding' && <TopNav route={route} navigate={navigate} />}
       <main className="page">
         {route.name === 'onboarding' && <Onboarding {...shared} />}
-        {route.name === 'home' && <Home {...shared} />}
+        {route.name === 'home' && <Hub {...shared} />}
+        {route.name === 'calendar' && <Calendar {...shared} />}
         {route.name === 'date' && <DateDetail {...shared} dateKey={route.params.key} />}
         {route.name === 'people' && <People {...shared} />}
         {route.name === 'settings' && <Settings {...shared} />}
@@ -165,14 +189,19 @@ export default function App() {
 function TopNav({ route, navigate }) {
   const tabs = [
     { name: 'home', label: 'Home' },
+    { name: 'calendar', label: 'Calendar' },
     { name: 'people', label: 'People' },
     { name: 'settings', label: 'Settings' },
   ]
   return (
     <header className="topnav">
-      <button type="button" className="brand" onClick={() => navigate('home')}>
-        <img src={LOGO} alt="" className="brand-mark" />
-        <span>TANDEM</span>
+      <button
+        type="button"
+        className="brand"
+        onClick={() => navigate('home')}
+        aria-label="TANDEM home"
+      >
+        <img src={LOGO} alt="TANDEM" className="brand-mark" />
       </button>
       <nav className="navlinks">
         {tabs.map((tab) => (
@@ -205,7 +234,7 @@ function TimeEditor({ label, times, onChange }) {
         </button>
       </div>
       {times.length === 0 ? (
-        <p className="muted">No times yet — add one so it appears as a quick option.</p>
+        <p className="muted">No times yet. Add one so it shows up as a quick option.</p>
       ) : (
         <div className="timegrid">
           {times.map((time, index) => (
@@ -302,15 +331,12 @@ function Onboarding({ state, route, navigate, patch, addPerson, removePerson, se
   return (
     <div className="onboard">
       <div className="onboard-head">
-        <img src={LOGO} alt="" className="onboard-mark" />
-        <h1>TANDEM</h1>
-        <p className="muted">Set up your carpool. Everything here can be changed later in Settings.</p>
+        <img src={LOGO} alt="TANDEM" className="onboard-mark" />
+        <h1>Set up your carpool</h1>
+        <p className="muted">Everything here can be changed later in Settings.</p>
         <ol className="steps">
           {labels.map((item, index) => (
-            <li
-              key={item}
-              className={index === step ? 'active' : index < step ? 'done' : ''}
-            >
+            <li key={item} className={index === step ? 'active' : index < step ? 'done' : ''}>
               {item}
             </li>
           ))}
@@ -319,7 +345,7 @@ function Onboarding({ state, route, navigate, patch, addPerson, removePerson, se
 
       {step === 0 && (
         <section className="card stack">
-          <h2>Who&apos;s in the carpool?</h2>
+          <h2>Who is in the carpool?</h2>
           <p className="muted">Add the people who might drive. You can add more anytime.</p>
           <PeopleField people={state.people} onAdd={addPerson} onRemove={removePerson} />
           <div className="row-end">
@@ -338,7 +364,7 @@ function Onboarding({ state, route, navigate, patch, addPerson, removePerson, se
       {step === 1 && (
         <section className="card stack">
           <h2>When are pickups?</h2>
-          <p className="muted">These become one-tap options when you schedule a day.</p>
+          <p className="muted">These become one tap options when you schedule a day.</p>
           <TimeEditor
             label="Pickup times"
             times={state.pickupTimes}
@@ -358,7 +384,7 @@ function Onboarding({ state, route, navigate, patch, addPerson, removePerson, se
       {step === 2 && (
         <section className="card stack">
           <h2>When are drop-offs?</h2>
-          <p className="muted">Same idea — quick options for the drop-off run.</p>
+          <p className="muted">Same idea. Quick options for the drop-off run.</p>
           <TimeEditor
             label="Drop-off times"
             times={state.dropoffTimes}
@@ -397,7 +423,103 @@ function Onboarding({ state, route, navigate, patch, addPerson, removePerson, se
   )
 }
 
-function Home({ state, navigate }) {
+function Hub({ state, navigate }) {
+  const upcoming = useMemo(() => {
+    const now = new Date()
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    return Object.entries(state.entries)
+      .map(([key, entry]) => ({ key, entry, date: fromKey(key) }))
+      .filter((item) => item.date >= startOfToday && usefulSlots(item.entry).length > 0)
+      .sort((a, b) => a.date - b.date)
+      .slice(0, 6)
+  }, [state.entries])
+
+  const scheduledDays = WEEK_ORDER.filter((d) => state.allowedWeekdays.includes(d))
+    .map((d) => WEEKDAY_LABELS[d])
+    .join(', ')
+
+  return (
+    <div className="stack lg">
+      <div className="hub-hero">
+        <img src={LOGO} alt="TANDEM" className="hub-mark" />
+        <div>
+          <h1>Your carpool</h1>
+          <p className="muted">
+            {state.people.length
+              ? `${state.people.length} ${state.people.length === 1 ? 'driver' : 'drivers'} ready to schedule.`
+              : 'Add drivers and times to get started.'}
+          </p>
+        </div>
+      </div>
+
+      <div className="tiles">
+        <button
+          type="button"
+          className="tile tile-accent"
+          onClick={() => navigate('calendar')}
+        >
+          <span className="tile-kicker">Plan</span>
+          <span className="tile-title">Open the calendar</span>
+          <span className="tile-sub">
+            Pick a day, add pickups and drop-offs, choose who drives.
+          </span>
+        </button>
+        <button type="button" className="tile" onClick={() => navigate('people')}>
+          <span className="tile-kicker">People</span>
+          <span className="tile-title">
+            {state.people.length ? state.people.join(', ') : 'No drivers yet'}
+          </span>
+          <span className="tile-sub">Add or remove carpool drivers.</span>
+        </button>
+        <button type="button" className="tile" onClick={() => navigate('settings')}>
+          <span className="tile-kicker">Settings</span>
+          <span className="tile-title">{scheduledDays || 'No days turned on'}</span>
+          <span className="tile-sub">Edit pickup and drop-off times and schedulable days.</span>
+        </button>
+      </div>
+
+      <section className="card stack">
+        <h2>Upcoming rides</h2>
+        {upcoming.length === 0 ? (
+          <p className="muted">Nothing scheduled yet. Open the calendar to add a ride.</p>
+        ) : (
+          <ul className="upcoming">
+            {upcoming.map(({ key, entry, date }) => (
+              <li key={key}>
+                <button
+                  type="button"
+                  className="upcoming-row"
+                  onClick={() => navigate('date', { key })}
+                >
+                  <span className="upcoming-date">
+                    {date.toLocaleDateString('en-US', {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                    })}
+                  </span>
+                  <span className="upcoming-rides">
+                    {usefulSlots(entry).map((slot) => (
+                      <span
+                        key={slot.id}
+                        className={slot.drivers.length ? 'chip-slot covered' : 'chip-slot'}
+                      >
+                        {slot.glyph} {slot.time ? formatTime(slot.time) : 'needs time'}
+                        {slot.drivers.length ? ` · ${slot.drivers.join(', ')}` : ''}
+                      </span>
+                    ))}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function Calendar({ state, navigate }) {
   const [view, setView] = useState(() => startOfMonth(new Date()))
   const today = new Date()
   const weeks = useMemo(() => buildMonthGrid(view), [view])
@@ -412,7 +534,7 @@ function Home({ state, navigate }) {
           <p className="muted">
             {state.people.length
               ? `Drivers: ${state.people.join(', ')}`
-              : 'No drivers yet — add people to start scheduling.'}
+              : 'No drivers yet. Add people to start scheduling.'}
           </p>
         </div>
         <div className="cal-nav">
@@ -473,19 +595,15 @@ function Home({ state, navigate }) {
                   <span className="cal-num">{day.getDate()}</span>
                   {entry && (
                     <span className="cal-slots">
-                      {RIDES.map((ride) => {
-                        const slot = entry[ride.key]
-                        if (!slot.time && slot.drivers.length === 0) return null
-                        return (
-                          <span
-                            key={ride.key}
-                            className={slot.drivers.length ? 'cal-slot covered' : 'cal-slot'}
-                          >
-                            {ride.glyph} {slot.time ? formatTime(slot.time) : 'needs time'}
-                            {slot.drivers.length ? ` · ${slot.drivers.join(', ')}` : ''}
-                          </span>
-                        )
-                      })}
+                      {usefulSlots(entry).map((slot) => (
+                        <span
+                          key={slot.id}
+                          className={slot.drivers.length ? 'cal-slot covered' : 'cal-slot'}
+                        >
+                          {slot.glyph} {slot.time ? formatTime(slot.time) : 'needs time'}
+                          {slot.drivers.length ? ` · ${slot.drivers.join(', ')}` : ''}
+                        </span>
+                      ))}
                     </span>
                   )}
                 </button>
@@ -496,14 +614,25 @@ function Home({ state, navigate }) {
       </div>
 
       <p className="legend">
-        <span className="dot" /> covered &nbsp;·&nbsp; ↑ pickup &nbsp;·&nbsp; ↓ drop-off &nbsp;·&nbsp;
-        tap any day to edit
+        <span className="dot" /> covered &nbsp;·&nbsp; ↑ pickup &nbsp;·&nbsp; ↓ drop-off
+        &nbsp;·&nbsp; tap any day to edit
       </p>
     </div>
   )
 }
 
-function DateDetail({ state, navigate, dateKey, toggleDriver, setRideTime, clearDay, toggleWeekday }) {
+function DateDetail({
+  state,
+  navigate,
+  dateKey,
+  addRide,
+  removeRide,
+  setRideTime,
+  toggleDriver,
+  pruneDay,
+  clearDay,
+  toggleWeekday,
+}) {
   const date = fromKey(dateKey)
   const allowed = state.allowedWeekdays.includes(date.getDay())
   const entry = state.entries[dateKey] || emptyEntry()
@@ -515,16 +644,21 @@ function DateDetail({ state, navigate, dateKey, toggleDriver, setRideTime, clear
   })
   const hasAnything = !isEmptyEntry(entry)
 
+  const save = () => {
+    pruneDay(dateKey)
+    navigate('calendar')
+  }
+
   return (
     <div className="stack lg">
-      <button type="button" className="btn ghost sm back" onClick={() => navigate('home')}>
+      <button type="button" className="btn ghost sm back" onClick={save}>
         ‹ Calendar
       </button>
       <h1>{heading}</h1>
 
       {!allowed && (
         <div className="notice">
-          <span>This weekday isn&apos;t part of your schedule yet.</span>
+          <span>This weekday is not part of your schedule yet.</span>
           <button
             type="button"
             className="btn ghost sm"
@@ -546,56 +680,95 @@ function DateDetail({ state, navigate, dateKey, toggleDriver, setRideTime, clear
         </div>
       ) : (
         RIDES.map((ride) => {
-          const slot = entry[ride.key]
-          const options = ride.key === 'pickup' ? state.pickupTimes : state.dropoffTimes
-          const customValue = options.includes(slot.time) ? '' : slot.time
+          const slots = entry[ride.key]
+          const options = state[ride.timesField]
           return (
             <section key={ride.key} className="card stack">
-              <h2>
-                {ride.glyph} {ride.label}
-              </h2>
-
-              <div className="stack sm">
-                <span className="field-label">Time</span>
-                <div className="choice-row">
-                  {options.map((time) => (
-                    <button
-                      key={time}
-                      type="button"
-                      className={slot.time === time ? 'toggle on' : 'toggle'}
-                      onClick={() =>
-                        setRideTime(dateKey, ride.key, slot.time === time ? '' : time)
-                      }
-                    >
-                      {formatTime(time)}
-                    </button>
-                  ))}
-                  <label className="custom-time">
-                    <span>Custom</span>
-                    <input
-                      type="time"
-                      value={customValue}
-                      onChange={(event) => setRideTime(dateKey, ride.key, event.target.value)}
-                    />
-                  </label>
-                </div>
+              <div className="row-between">
+                <h2>
+                  {ride.glyph} {ride.label}
+                  {slots.length > 1 ? `s (${slots.length})` : ''}
+                </h2>
+                <button
+                  type="button"
+                  className="btn ghost sm"
+                  onClick={() => addRide(dateKey, ride.key)}
+                >
+                  + Add {ride.label.toLowerCase()}
+                </button>
               </div>
 
-              <div className="stack sm">
-                <span className="field-label">Who&apos;s driving</span>
-                <div className="choice-row">
-                  {state.people.map((person) => (
-                    <button
-                      key={person}
-                      type="button"
-                      className={slot.drivers.includes(person) ? 'toggle on' : 'toggle'}
-                      onClick={() => toggleDriver(dateKey, ride.key, person)}
-                    >
-                      {person}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              {slots.length === 0 && (
+                <p className="muted">
+                  No {ride.label.toLowerCase()} yet. Add one to set a time and pick drivers.
+                </p>
+              )}
+
+              {slots.map((slot, index) => {
+                const customValue = options.includes(slot.time) ? '' : slot.time
+                return (
+                  <div key={slot.id} className="ride-slot stack sm">
+                    <div className="row-between">
+                      <span className="field-label">
+                        {ride.label} {index + 1}
+                      </span>
+                      <button
+                        type="button"
+                        className="iconbtn"
+                        onClick={() => removeRide(dateKey, ride.key, slot.id)}
+                        aria-label={`Remove ${ride.label.toLowerCase()} ${index + 1}`}
+                      >
+                        ×
+                      </button>
+                    </div>
+
+                    <span className="field-label">Time</span>
+                    <div className="choice-row">
+                      {options.map((time) => (
+                        <button
+                          key={time}
+                          type="button"
+                          className={slot.time === time ? 'toggle on' : 'toggle'}
+                          onClick={() =>
+                            setRideTime(
+                              dateKey,
+                              ride.key,
+                              slot.id,
+                              slot.time === time ? '' : time,
+                            )
+                          }
+                        >
+                          {formatTime(time)}
+                        </button>
+                      ))}
+                      <label className="custom-time">
+                        <span>Custom</span>
+                        <input
+                          type="time"
+                          value={customValue}
+                          onChange={(event) =>
+                            setRideTime(dateKey, ride.key, slot.id, event.target.value)
+                          }
+                        />
+                      </label>
+                    </div>
+
+                    <span className="field-label">Who is driving</span>
+                    <div className="choice-row">
+                      {state.people.map((person) => (
+                        <button
+                          key={person}
+                          type="button"
+                          className={slot.drivers.includes(person) ? 'toggle on' : 'toggle'}
+                          onClick={() => toggleDriver(dateKey, ride.key, slot.id, person)}
+                        >
+                          {person}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
             </section>
           )
         })
@@ -610,7 +783,7 @@ function DateDetail({ state, navigate, dateKey, toggleDriver, setRideTime, clear
         >
           Clear day
         </button>
-        <button type="button" className="btn" onClick={() => navigate('home')}>
+        <button type="button" className="btn" onClick={save}>
           Save
         </button>
       </div>
@@ -634,7 +807,9 @@ function People({ state, addPerson, removePerson }) {
 
 function Settings({ state, navigate, patch, setTimes, toggleWeekday }) {
   const resetAll = () => {
-    if (window.confirm('Reset all TANDEM data? People, times, and scheduled days will be cleared.')) {
+    if (
+      window.confirm('Reset all TANDEM data? People, times, and scheduled days will be cleared.')
+    ) {
       patch({ ...defaultState, onboarded: true })
     }
   }
@@ -663,7 +838,7 @@ function Settings({ state, navigate, patch, setTimes, toggleWeekday }) {
       <section className="card stack">
         <h3>Schedulable days</h3>
         <p className="muted">
-          Only these weekdays can have rides added. Turn a day off and it becomes read-only on the
+          Only these weekdays can have rides added. Turn a day off and it becomes read only on the
           calendar.
         </p>
         <WeekdayPicker allowed={state.allowedWeekdays} onToggle={toggleWeekday} />

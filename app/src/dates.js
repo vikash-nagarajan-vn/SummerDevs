@@ -6,8 +6,8 @@ export const MONTHS = [
 // Indexed by Date.getDay() (0 = Sunday)
 export const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-// Monday-first order of getDay() values, for calendar headers and pickers
-export const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]
+// Sunday-first order of getDay() values, for calendar headers and pickers
+export const WEEK_ORDER = [0, 1, 2, 3, 4, 5, 6]
 
 const pad = (n) => String(n).padStart(2, '0')
 
@@ -31,10 +31,10 @@ export const addMonths = (date, n) => new Date(date.getFullYear(), date.getMonth
 export const addDays = (date, n) =>
   new Date(date.getFullYear(), date.getMonth(), date.getDate() + n)
 
-// Returns 6 weeks (rows) of 7 Date objects, Monday-first, covering the month of `viewDate`.
+// Returns 6 weeks (rows) of 7 Date objects, Sunday-first, covering the month of `viewDate`.
 export const buildMonthGrid = (viewDate) => {
   const first = startOfMonth(viewDate)
-  const leading = (first.getDay() + 6) % 7 // days before the 1st, Monday-first
+  const leading = first.getDay() // days before the 1st, Sunday-first
   const gridStart = addDays(first, -leading)
   const weeks = []
   let cursor = gridStart
