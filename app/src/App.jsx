@@ -1,480 +1,693 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import './App.css'
+import { loadState, saveState, defaultState } from './storage'
+import {
+  toKey,
+  fromKey,
+  isSameDay,
+  startOfMonth,
+  addMonths,
+  buildMonthGrid,
+  formatTime,
+  MONTHS,
+  WEEKDAY_LABELS,
+  WEEK_ORDER,
+} from './dates'
 
-const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-const PICKUP_OPTIONS = ['3:00 PM', '3:15 PM', '3:30 PM', '4:00 PM']
-const DROPOFF_OPTIONS = ['3:30 PM', '3:45 PM', '4:15 PM', '4:30 PM']
+const LOGO = '/tandem-logo.svg'
 
-const buildDefaultAvailability = () => ({
-  Mon: { pickup: { selected: true, certainty: 'sure', times: ['3:15 PM'] }, dropoff: { selected: true, certainty: 'sure', times: ['3:45 PM'] } },
-  Tue: { pickup: { selected: true, certainty: 'sure', times: ['3:15 PM', '3:30 PM'] }, dropoff: { selected: true, certainty: 'maybe', times: ['3:45 PM'] } },
-  Wed: { pickup: { selected: true, certainty: 'maybe', times: ['4:00 PM'] }, dropoff: { selected: false, certainty: 'sure', times: [] } },
-  Thu: { pickup: { selected: false, certainty: 'sure', times: [] }, dropoff: { selected: true, certainty: 'sure', times: ['4:15 PM'] } },
-  Fri: { pickup: { selected: true, certainty: 'sure', times: ['3:30 PM'] }, dropoff: { selected: true, certainty: 'sure', times: ['3:30 PM'] } },
-  Sat: { pickup: { selected: false, certainty: 'sure', times: [] }, dropoff: { selected: false, certainty: 'sure', times: [] } },
-  Sun: { pickup: { selected: true, certainty: 'maybe', times: ['3:00 PM'] }, dropoff: { selected: true, certainty: 'sure', times: ['4:30 PM'] } },
-})
-
-const defaultParticipants = [
-  { name: 'Alex', availability: buildDefaultAvailability() },
-  { name: 'Sam', availability: { ...buildDefaultAvailability(), Mon: { pickup: { selected: true, certainty: 'maybe', times: ['3:00 PM'] }, dropoff: { selected: true, certainty: 'sure', times: ['3:45 PM'] } }, Tue: { pickup: { selected: true, certainty: 'sure', times: ['3:30 PM'] }, dropoff: { selected: true, certainty: 'sure', times: ['3:45 PM'] } }, Wed: { pickup: { selected: true, certainty: 'sure', times: ['3:15 PM'] }, dropoff: { selected: false, certainty: 'sure', times: [] } }, Thu: { pickup: { selected: false, certainty: 'sure', times: [] }, dropoff: { selected: true, certainty: 'sure', times: ['4:15 PM'] } }, Fri: { pickup: { selected: true, certainty: 'maybe', times: ['3:00 PM'] }, dropoff: { selected: true, certainty: 'sure', times: ['3:30 PM'] } }, Sat: { pickup: { selected: false, certainty: 'sure', times: [] }, dropoff: { selected: false, certainty: 'sure', times: [] } }, Sun: { pickup: { selected: true, certainty: 'sure', times: ['3:00 PM'] }, dropoff: { selected: true, certainty: 'sure', times: ['4:30 PM'] } } } },
-  { name: 'Jordan', availability: { ...buildDefaultAvailability(), Mon: { pickup: { selected: true, certainty: 'sure', times: ['3:15 PM', '3:30 PM'] }, dropoff: { selected: true, certainty: 'maybe', times: ['3:45 PM'] } }, Tue: { pickup: { selected: true, certainty: 'sure', times: ['3:15 PM'] }, dropoff: { selected: false, certainty: 'sure', times: [] } }, Wed: { pickup: { selected: true, certainty: 'sure', times: ['3:30 PM'] }, dropoff: { selected: true, certainty: 'sure', times: ['4:15 PM'] } }, Thu: { pickup: { selected: true, certainty: 'maybe', times: ['4:00 PM'] }, dropoff: { selected: true, certainty: 'sure', times: ['4:15 PM'] } }, Fri: { pickup: { selected: false, certainty: 'sure', times: [] }, dropoff: { selected: true, certainty: 'sure', times: ['3:30 PM'] } }, Sat: { pickup: { selected: false, certainty: 'sure', times: [] }, dropoff: { selected: false, certainty: 'sure', times: [] } }, Sun: { pickup: { selected: true, certainty: 'sure', times: ['3:00 PM'] }, dropoff: { selected: true, certainty: 'sure', times: ['4:15 PM'] } } } },
-  { name: 'Chris', availability: { ...buildDefaultAvailability(), Mon: { pickup: { selected: true, certainty: 'sure', times: ['3:00 PM'] }, dropoff: { selected: false, certainty: 'sure', times: [] } }, Tue: { pickup: { selected: true, certainty: 'maybe', times: ['4:00 PM'] }, dropoff: { selected: true, certainty: 'sure', times: ['3:45 PM'] } }, Wed: { pickup: { selected: false, certainty: 'sure', times: [] }, dropoff: { selected: true, certainty: 'sure', times: ['3:45 PM'] } }, Thu: { pickup: { selected: true, certainty: 'sure', times: ['3:15 PM'] }, dropoff: { selected: false, certainty: 'sure', times: [] } }, Fri: { pickup: { selected: true, certainty: 'maybe', times: ['3:30 PM'] }, dropoff: { selected: true, certainty: 'sure', times: ['3:30 PM'] } }, Sat: { pickup: { selected: false, certainty: 'sure', times: [] }, dropoff: { selected: false, certainty: 'sure', times: [] } }, Sun: { pickup: { selected: false, certainty: 'sure', times: [] }, dropoff: { selected: true, certainty: 'maybe', times: ['4:30 PM'] } } } },
+const RIDES = [
+  { key: 'pickup', label: 'Pickup', glyph: '↑' },
+  { key: 'dropoff', label: 'Drop-off', glyph: '↓' },
 ]
 
-const starterSchedule = {
-  name: 'School Carpool',
-  creator: 'Alex',
-  code: 'X7K29A',
-  days: DAYS,
-  pickupTimes: PICKUP_OPTIONS,
-  dropoffTimes: DROPOFF_OPTIONS,
-  participants: defaultParticipants,
-}
+const emptyEntry = () => ({
+  pickup: { time: '', drivers: [] },
+  dropoff: { time: '', drivers: [] },
+})
 
-const formatWeekRange = (date) => {
-  const start = new Date(date)
-  const day = start.getDay()
-  const diff = (day === 0 ? -6 : 1 - day)
-  start.setDate(start.getDate() + diff)
+const isEmptyEntry = (e) =>
+  !e.pickup.time &&
+  !e.dropoff.time &&
+  e.pickup.drivers.length === 0 &&
+  e.dropoff.drivers.length === 0
 
-  const end = new Date(start)
-  end.setDate(start.getDate() + 6)
-
-  const monthDay = (value) => value.toLocaleString('en-US', { month: 'short', day: 'numeric' })
-  return `${monthDay(start)}–${monthDay(end)}`
-}
-
-const getWeekStart = (baseDate = new Date()) => {
-  const date = new Date(baseDate)
-  const diff = (date.getDay() + 6) % 7
-  date.setHours(0, 0, 0, 0)
-  date.setDate(date.getDate() - diff)
-  return date
-}
-
-const sameDayName = (date) => {
-  const dayIndex = (date.getDay() + 6) % 7
-  return DAYS[dayIndex]
-}
-
-function App() {
-  const [screen, setScreen] = useState('home')
-  const [activeTab, setActiveTab] = useState('schedule')
-  const [wizardMode, setWizardMode] = useState(null)
-  const [joinForm, setJoinForm] = useState({ code: 'X7K29A', name: 'Jordan' })
-  const [schedule, setSchedule] = useState(starterSchedule)
-  const [selectedPerson, setSelectedPerson] = useState('Alex')
-  const [weekStart, setWeekStart] = useState(getWeekStart())
-  const [generatedSchedule, setGeneratedSchedule] = useState([
-    { day: 'Mon', type: 'pickup', person: 'Alex', certainty: 'sure' },
-    { day: 'Mon', type: 'dropoff', person: 'Sam', certainty: 'sure' },
-    { day: 'Tue', type: 'pickup', person: 'Jordan', certainty: 'sure' },
-    { day: 'Tue', type: 'dropoff', person: 'Alex', certainty: 'sure' },
-    { day: 'Wed', type: 'pickup', person: 'Sam', certainty: 'sure' },
-    { day: 'Wed', type: 'dropoff', person: 'Jordan', certainty: 'sure' },
-  ])
-
-  const selectedUser = useMemo(
-    () => schedule.participants.find((person) => person.name === selectedPerson) ?? schedule.participants[0],
-    [schedule.participants, selectedPerson],
+export default function App() {
+  const [state, setState] = useState(loadState)
+  const [route, setRoute] = useState(() =>
+    state.onboarded ? { name: 'home', params: {} } : { name: 'onboarding', params: { step: 0 } },
   )
 
-  const weekDays = useMemo(
-    () => DAYS.map((day, index) => {
-      const date = new Date(weekStart)
-      date.setDate(date.getDate() + index)
-      return { name: day, label: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), date }
-    }),
-    [weekStart],
-  )
+  useEffect(() => {
+    saveState(state)
+  }, [state])
 
-  const todayAssignments = useMemo(() => {
-    const todayName = sameDayName(new Date())
-    return generatedSchedule.filter((entry) => entry.day === todayName)
-  }, [generatedSchedule])
+  useEffect(() => {
+    const onPop = (event) => {
+      if (event.state && event.state.route) setRoute(event.state.route)
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
 
-  const participantBalance = useMemo(() => {
-    const total = schedule.participants.map((person) => ({
-      name: person.name,
-      rides: generatedSchedule.filter((entry) => entry.person === person.name).length,
-    }))
-    return total.sort((a, b) => b.rides - a.rides || a.name.localeCompare(b.name))
-  }, [generatedSchedule, schedule.participants])
-
-  const createSchedule = () => {
-    setScreen('schedule')
-    setActiveTab('schedule')
-    setWizardMode(null)
+  const navigate = (name, params = {}) => {
+    const next = { name, params }
+    window.history.pushState({ route: next }, '')
+    setRoute(next)
+    window.scrollTo(0, 0)
   }
 
-  const joinSchedule = () => {
-    setScreen('schedule')
-    setActiveTab('schedule')
-    setWizardMode(null)
+  const patch = (fields) => setState((current) => ({ ...current, ...fields }))
+
+  const updateEntry = (key, updater) => {
+    setState((current) => {
+      const source = current.entries[key] || emptyEntry()
+      const draft = {
+        pickup: { time: source.pickup.time, drivers: [...source.pickup.drivers] },
+        dropoff: { time: source.dropoff.time, drivers: [...source.dropoff.drivers] },
+      }
+      const next = updater(draft)
+      const entries = { ...current.entries }
+      if (isEmptyEntry(next)) delete entries[key]
+      else entries[key] = next
+      return { ...current, entries }
+    })
   }
 
-  const setAvailability = (day, rideType, next) => {
-    setSchedule((current) => ({
-      ...current,
-      participants: current.participants.map((person) => {
-        if (person.name !== selectedUser.name) return person
-        const previous = person.availability?.[day]?.[rideType] ?? { selected: false, certainty: 'sure', times: [] }
-        const safeTimes = next?.selected ? (next.times?.length ? next.times : previous.times) : []
+  const toggleDriver = (key, ride, person) =>
+    updateEntry(key, (draft) => {
+      const list = draft[ride].drivers
+      draft[ride].drivers = list.includes(person)
+        ? list.filter((name) => name !== person)
+        : [...list, person]
+      return draft
+    })
 
-        return {
-          ...person,
-          availability: {
-            ...person.availability,
-            [day]: {
-              ...person.availability[day],
-              [rideType]: {
-                selected: next?.selected ?? previous.selected,
-                certainty: next?.certainty ?? previous.certainty ?? 'sure',
-                times: safeTimes,
-              },
-            },
+  const setRideTime = (key, ride, time) =>
+    updateEntry(key, (draft) => {
+      draft[ride].time = time
+      return draft
+    })
+
+  const clearDay = (key) =>
+    setState((current) => {
+      const entries = { ...current.entries }
+      delete entries[key]
+      return { ...current, entries }
+    })
+
+  const addPerson = (name) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    setState((current) =>
+      current.people.includes(trimmed)
+        ? current
+        : { ...current, people: [...current.people, trimmed] },
+    )
+  }
+
+  const removePerson = (name) =>
+    setState((current) => {
+      const entries = {}
+      for (const [key, entry] of Object.entries(current.entries)) {
+        entries[key] = {
+          pickup: {
+            time: entry.pickup.time,
+            drivers: entry.pickup.drivers.filter((driver) => driver !== name),
+          },
+          dropoff: {
+            time: entry.dropoff.time,
+            drivers: entry.dropoff.drivers.filter((driver) => driver !== name),
           },
         }
-      }),
+      }
+      return { ...current, people: current.people.filter((p) => p !== name), entries }
+    })
+
+  const setTimes = (field, times) => patch({ [field]: times })
+
+  const toggleWeekday = (weekday) =>
+    setState((current) => ({
+      ...current,
+      allowedWeekdays: current.allowedWeekdays.includes(weekday)
+        ? current.allowedWeekdays.filter((day) => day !== weekday)
+        : [...current.allowedWeekdays, weekday].sort((a, b) => a - b),
     }))
-  }
 
-  const toggleRideSelection = (day, rideType) => {
-    const current = selectedUser.availability?.[day]?.[rideType] ?? { selected: false, certainty: 'sure', times: [] }
-    const nextSelected = !current.selected
-    setAvailability(day, rideType, {
-      selected: nextSelected,
-      certainty: current.certainty || 'sure',
-      times: nextSelected ? current.times.length ? current.times : [schedule.pickupTimes[0]] : [],
-    })
-  }
-
-  const setRideCertainty = (day, rideType, certainty) => {
-    const current = selectedUser.availability?.[day]?.[rideType] ?? { selected: false, certainty: 'sure', times: [] }
-    setAvailability(day, rideType, {
-      selected: current.selected,
-      certainty,
-      times: current.times,
-    })
-  }
-
-  const toggleTimeSelection = (day, rideType, time) => {
-    const current = selectedUser.availability?.[day]?.[rideType] ?? { selected: true, certainty: 'sure', times: [] }
-    const times = current.times.includes(time)
-      ? current.times.filter((entry) => entry !== time)
-      : [...current.times, time]
-
-    setAvailability(day, rideType, {
-      selected: true,
-      certainty: current.certainty || 'sure',
-      times,
-    })
-  }
-
-  const removeAvailability = (day, rideType) => {
-    setAvailability(day, rideType, {
-      selected: false,
-      certainty: 'sure',
-      times: [],
-    })
-  }
-
-  const generateFairSchedule = () => {
-    const riderCounts = Object.fromEntries(schedule.participants.map((person) => [person.name, 0]))
-    const assignments = []
-
-    DAYS.forEach((day) => {
-      ['pickup', 'dropoff'].forEach((rideType) => {
-        const available = schedule.participants
-          .filter((person) => {
-            const slot = person.availability?.[day]?.[rideType]
-            return slot?.selected && slot.times?.length > 0
-          })
-          .map((person) => {
-            const slot = person.availability[day][rideType]
-            const score = (slot.certainty === 'sure' ? 110 : 70) - riderCounts[person.name] * 18
-            return { person: person.name, certainty: slot.certainty, score }
-          })
-          .sort((a, b) => b.score - a.score || a.person.localeCompare(b.person))
-
-        if (available.length > 0) {
-          const chosen = available[0]
-          assignments.push({ day, type: rideType, person: chosen.person, certainty: chosen.certainty })
-          riderCounts[chosen.person] += 1
-        }
-      })
-    })
-
-    setGeneratedSchedule(assignments)
+  const shared = {
+    state,
+    route,
+    navigate,
+    patch,
+    toggleDriver,
+    setRideTime,
+    clearDay,
+    addPerson,
+    removePerson,
+    setTimes,
+    toggleWeekday,
   }
 
   return (
-    <div className="app-shell">
-      {screen === 'home' ? (
-        <div className="landing-page">
-          <header className="landing-header">
-            <div className="brand">PULLUP</div>
-          </header>
+    <div className="app">
+      {route.name !== 'onboarding' && <TopNav route={route} navigate={navigate} />}
+      <main className="page">
+        {route.name === 'onboarding' && <Onboarding {...shared} />}
+        {route.name === 'home' && <Home {...shared} />}
+        {route.name === 'date' && <DateDetail {...shared} dateKey={route.params.key} />}
+        {route.name === 'people' && <People {...shared} />}
+        {route.name === 'settings' && <Settings {...shared} />}
+      </main>
+    </div>
+  )
+}
 
-          <main className="hero-panel">
-            <p className="eyebrow">Your ride. Your route. Your community.</p>
-            <h1>PULLUP</h1>
-            <p className="subhead">Coordinate school carpools, see who&apos;s available, and automatically create a fair schedule.</p>
+function TopNav({ route, navigate }) {
+  const tabs = [
+    { name: 'home', label: 'Home' },
+    { name: 'people', label: 'People' },
+    { name: 'settings', label: 'Settings' },
+  ]
+  return (
+    <header className="topnav">
+      <button type="button" className="brand" onClick={() => navigate('home')}>
+        <img src={LOGO} alt="" className="brand-mark" />
+        <span>TANDEM</span>
+      </button>
+      <nav className="navlinks">
+        {tabs.map((tab) => (
+          <button
+            key={tab.name}
+            type="button"
+            className={route.name === tab.name ? 'navlink active' : 'navlink'}
+            onClick={() => navigate(tab.name)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </nav>
+    </header>
+  )
+}
 
-            <div className="cta-row">
-              <button type="button" className="primary-button" onClick={() => setWizardMode('create')}>
-                Create a Schedule
-              </button>
-              <button type="button" className="secondary-button" onClick={() => setWizardMode('join')}>
-                Join a Schedule
+function TimeEditor({ label, times, onChange }) {
+  const update = (index, value) =>
+    onChange(times.map((time, i) => (i === index ? value : time)))
+  const remove = (index) => onChange(times.filter((_, i) => i !== index))
+  const add = () => onChange([...times, '15:00'])
+
+  return (
+    <div className="stack">
+      <div className="row-between">
+        <h3>{label}</h3>
+        <button type="button" className="btn ghost sm" onClick={add}>
+          + Add time
+        </button>
+      </div>
+      {times.length === 0 ? (
+        <p className="muted">No times yet — add one so it appears as a quick option.</p>
+      ) : (
+        <div className="timegrid">
+          {times.map((time, index) => (
+            <div key={index} className="timerow">
+              <input
+                type="time"
+                value={time}
+                onChange={(event) => update(index, event.target.value)}
+              />
+              <button
+                type="button"
+                className="iconbtn"
+                onClick={() => remove(index)}
+                aria-label={`Remove ${formatTime(time)}`}
+              >
+                ×
               </button>
             </div>
-          </main>
-
-          {wizardMode && (
-            <section className="wizard-panel">
-              {wizardMode === 'create' ? (
-                <>
-                  <h2>Create a schedule</h2>
-                  <label>
-                    Schedule Name
-                    <input defaultValue={schedule.name} onChange={(event) => setSchedule((current) => ({ ...current, name: event.target.value }))} />
-                  </label>
-                  <label>
-                    Creator Name
-                    <input defaultValue={schedule.creator} onChange={(event) => setSchedule((current) => ({ ...current, creator: event.target.value }))} />
-                  </label>
-                  <div className="days-grid">
-                    {DAYS.map((day) => (
-                      <label key={day} className="day-pill">
-                        <input type="checkbox" defaultChecked />
-                        {day}
-                      </label>
-                    ))}
-                  </div>
-                  <button type="button" className="primary-button" onClick={createSchedule}>
-                    Create Schedule
-                  </button>
-                </>
-              ) : (
-                <>
-                  <h2>You&apos;ve been invited to join</h2>
-                  <p className="invite-name">{schedule.name}</p>
-                  <label>
-                    Name
-                    <input value={joinForm.name} onChange={(event) => setJoinForm((current) => ({ ...current, name: event.target.value }))} />
-                  </label>
-                  <button type="button" className="primary-button" onClick={joinSchedule}>
-                    Join Schedule
-                  </button>
-                </>
-              )}
-            </section>
-          )}
-        </div>
-      ) : (
-        <div className="dashboard-shell">
-          <aside className="sidebar">
-            <div className="brand">PULLUP</div>
-            <nav className="nav">
-              {['schedule', 'people', 'share', 'settings'].map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  className={activeTab === tab ? 'nav-button active' : 'nav-button'}
-                  onClick={() => setActiveTab(tab)}
-                >
-                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                </button>
-              ))}
-            </nav>
-          </aside>
-
-          <main className="main-panel">
-            {activeTab === 'schedule' && (
-              <>
-                <div className="topbar">
-                  <div>
-                    <div className="section-kicker">School Carpool</div>
-                    <div className="title-group">
-                      <button type="button" className="ghost-button" onClick={() => setWeekStart((current) => new Date(current.setDate(current.getDate() - 7)))}>
-                        {'< Previous Week'}
-                      </button>
-                      <h2>{formatWeekRange(weekStart)}</h2>
-                      <button type="button" className="ghost-button" onClick={() => setWeekStart((current) => new Date(current.setDate(current.getDate() + 7)))}>
-                        {'Next Week >'}
-                      </button>
-                    </div>
-                  </div>
-                  <button type="button" className="primary-button" onClick={generateFairSchedule}>
-                    Generate Schedule
-                  </button>
-                </div>
-
-                <section className="mini-summary">
-                  <div className="mini-block">
-                    <div className="label">Today</div>
-                    {todayAssignments.length ? (
-                      <div className="today-row">
-                        {todayAssignments.map((ride) => (
-                          <span key={`${ride.day}-${ride.type}`}>
-                            {ride.type === 'pickup' ? 'Pickup' : 'Drop-off'}: {ride.person} · {ride.certainty === 'sure' ? 'For Sure' : 'Maybe'}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="today-empty">No rides scheduled today.</div>
-                    )}
-                  </div>
-                </section>
-
-                <section className="calendar-card">
-                  <div className="calendar-head">
-                    {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
-                      <div key={day} className="day-header">{day}</div>
-                    ))}
-                  </div>
-                  <div className="calendar-row">
-                    {DAYS.map((day) => {
-                      const person = selectedUser
-                      const pickup = person.availability?.[day]?.pickup
-                      const drop = person.availability?.[day]?.dropoff
-                      return (
-                        <div key={day} className="day-box">
-                          <div className="day-tag">{day}</div>
-                          <div className="availability-toggle">
-                            <span>Pickup</span>
-                            <input type="checkbox" checked={pickup?.selected ?? false} onChange={() => toggleRideSelection(day, 'pickup')} />
-                          </div>
-                          <div className="availability-toggle">
-                            <span>Drop-off</span>
-                            <input type="checkbox" checked={drop?.selected ?? false} onChange={() => toggleRideSelection(day, 'dropoff')} />
-                          </div>
-                          {pickup?.selected && (
-                            <div className="ride-config">
-                              <div className="certainty-row">
-                                <button type="button" className={pickup.certainty === 'sure' ? 'chip active green' : 'chip'} onClick={() => setRideCertainty(day, 'pickup', 'sure')}>For Sure</button>
-                                <button type="button" className={pickup.certainty === 'maybe' ? 'chip active yellow' : 'chip'} onClick={() => setRideCertainty(day, 'pickup', 'maybe')}>Maybe</button>
-                              </div>
-                              <div className="time-list">
-                                {schedule.pickupTimes.map((time) => (
-                                  <label key={time} className="time-option">
-                                    <input type="checkbox" checked={pickup.times.includes(time)} onChange={() => toggleTimeSelection(day, 'pickup', time)} />
-                                    {time}
-                                  </label>
-                                ))}
-                              </div>
-                              <button type="button" className="text-button" onClick={() => removeAvailability(day, 'pickup')}>Remove</button>
-                            </div>
-                          )}
-                          {drop?.selected && (
-                            <div className="ride-config">
-                              <div className="certainty-row">
-                                <button type="button" className={drop.certainty === 'sure' ? 'chip active green' : 'chip'} onClick={() => setRideCertainty(day, 'dropoff', 'sure')}>For Sure</button>
-                                <button type="button" className={drop.certainty === 'maybe' ? 'chip active yellow' : 'chip'} onClick={() => setRideCertainty(day, 'dropoff', 'maybe')}>Maybe</button>
-                              </div>
-                              <div className="time-list">
-                                {schedule.dropoffTimes.map((time) => (
-                                  <label key={time} className="time-option">
-                                    <input type="checkbox" checked={drop.times.includes(time)} onChange={() => toggleTimeSelection(day, 'dropoff', time)} />
-                                    {time}
-                                  </label>
-                                ))}
-                              </div>
-                              <button type="button" className="text-button" onClick={() => removeAvailability(day, 'dropoff')}>Remove</button>
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </section>
-
-                <section className="insights-grid">
-                  <div className="panel">
-                    <div className="panel-header">Availability overview</div>
-                    <div className="people-overview">
-                      {schedule.participants.map((person) => (
-                        <div key={person.name} className="person-row">
-                          <div className="person-name">{person.name}</div>
-                          <div className="person-days">
-                            {DAYS.slice(0, 5).map((day) => {
-                              const pickup = person.availability[day].pickup
-                              const drop = person.availability[day].dropoff
-                              return (
-                                <span key={`${person.name}-${day}`} className={`status-pill ${pickup.selected ? (pickup.certainty === 'sure' ? 'green' : 'yellow') : ''}`}>
-                                  {pickup.selected ? '✓' : '—'}
-                                </span>
-                              )
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="panel">
-                    <div className="panel-header">Carpool balance</div>
-                    <div className="balance-list">
-                      {participantBalance.map((entry) => (
-                        <div key={entry.name} className="balance-item">
-                          <span>{entry.name}</span>
-                          <strong>{entry.rides}</strong>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </section>
-              </>
-            )}
-
-            {activeTab === 'people' && (
-              <section className="panel full-panel">
-                <div className="panel-header">People</div>
-                <div className="people-list">
-                  {schedule.participants.map((person) => (
-                    <button type="button" key={person.name} className={selectedPerson === person.name ? 'person-card active' : 'person-card'} onClick={() => setSelectedPerson(person.name)}>
-                      <div>
-                        <strong>{person.name}</strong>
-                        <span>{generatedSchedule.filter((entry) => entry.person === person.name).length} rides</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {activeTab === 'share' && (
-              <section className="panel full-panel">
-                <div className="panel-header">Invite people to this schedule</div>
-                <p className="share-link">PULLUP / join / {schedule.code}</p>
-                <div className="share-actions">
-                  <button type="button" className="primary-button" onClick={() => navigator.clipboard?.writeText(`PULLUP / join / ${schedule.code}`)}>Copy Link</button>
-                  <button type="button" className="secondary-button">View Only Link</button>
-                </div>
-              </section>
-            )}
-
-            {activeTab === 'settings' && (
-              <section className="panel full-panel">
-                <div className="panel-header">Settings</div>
-                <ul className="settings-list">
-                  <li>Schedule name</li>
-                  <li>Manage days</li>
-                  <li>Manage pickup times</li>
-                  <li>Manage drop-off times</li>
-                  <li>Manage participants</li>
-                  <li>Leave schedule</li>
-                  <li>Delete schedule</li>
-                </ul>
-              </section>
-            )}
-          </main>
+          ))}
         </div>
       )}
     </div>
   )
 }
 
-export default App
+function WeekdayPicker({ allowed, onToggle }) {
+  return (
+    <div className="choice-row">
+      {WEEK_ORDER.map((weekday) => (
+        <button
+          key={weekday}
+          type="button"
+          className={allowed.includes(weekday) ? 'toggle on' : 'toggle'}
+          onClick={() => onToggle(weekday)}
+        >
+          {WEEKDAY_LABELS[weekday]}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function PeopleField({ people, onAdd, onRemove }) {
+  const [name, setName] = useState('')
+  const submit = (event) => {
+    event.preventDefault()
+    onAdd(name)
+    setName('')
+  }
+  return (
+    <div className="stack">
+      <form className="addrow" onSubmit={submit}>
+        <input
+          placeholder="Add a name"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+        />
+        <button type="submit" className="btn">
+          Add
+        </button>
+      </form>
+      {people.length === 0 ? (
+        <p className="muted">No one added yet.</p>
+      ) : (
+        <ul className="chips">
+          {people.map((person) => (
+            <li key={person} className="chip">
+              <span>{person}</span>
+              <button
+                type="button"
+                className="iconbtn"
+                onClick={() => onRemove(person)}
+                aria-label={`Remove ${person}`}
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function Onboarding({ state, route, navigate, patch, addPerson, removePerson, setTimes, toggleWeekday }) {
+  const step = route.params.step ?? 0
+  const labels = ['People', 'Pickup times', 'Drop-off times', 'Schedule days']
+  const go = (index) => navigate('onboarding', { step: index })
+  const finish = () => {
+    patch({ onboarded: true })
+    navigate('home')
+  }
+
+  return (
+    <div className="onboard">
+      <div className="onboard-head">
+        <img src={LOGO} alt="" className="onboard-mark" />
+        <h1>TANDEM</h1>
+        <p className="muted">Set up your carpool. Everything here can be changed later in Settings.</p>
+        <ol className="steps">
+          {labels.map((item, index) => (
+            <li
+              key={item}
+              className={index === step ? 'active' : index < step ? 'done' : ''}
+            >
+              {item}
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      {step === 0 && (
+        <section className="card stack">
+          <h2>Who&apos;s in the carpool?</h2>
+          <p className="muted">Add the people who might drive. You can add more anytime.</p>
+          <PeopleField people={state.people} onAdd={addPerson} onRemove={removePerson} />
+          <div className="row-end">
+            <button
+              type="button"
+              className="btn"
+              disabled={state.people.length === 0}
+              onClick={() => go(1)}
+            >
+              Continue
+            </button>
+          </div>
+        </section>
+      )}
+
+      {step === 1 && (
+        <section className="card stack">
+          <h2>When are pickups?</h2>
+          <p className="muted">These become one-tap options when you schedule a day.</p>
+          <TimeEditor
+            label="Pickup times"
+            times={state.pickupTimes}
+            onChange={(times) => setTimes('pickupTimes', times)}
+          />
+          <div className="row-between">
+            <button type="button" className="btn ghost" onClick={() => go(0)}>
+              Back
+            </button>
+            <button type="button" className="btn" onClick={() => go(2)}>
+              Continue
+            </button>
+          </div>
+        </section>
+      )}
+
+      {step === 2 && (
+        <section className="card stack">
+          <h2>When are drop-offs?</h2>
+          <p className="muted">Same idea — quick options for the drop-off run.</p>
+          <TimeEditor
+            label="Drop-off times"
+            times={state.dropoffTimes}
+            onChange={(times) => setTimes('dropoffTimes', times)}
+          />
+          <div className="row-between">
+            <button type="button" className="btn ghost" onClick={() => go(1)}>
+              Back
+            </button>
+            <button type="button" className="btn" onClick={() => go(3)}>
+              Continue
+            </button>
+          </div>
+        </section>
+      )}
+
+      {step === 3 && (
+        <section className="card stack">
+          <h2>Which days can be scheduled?</h2>
+          <p className="muted">
+            Only these weekdays can have pickups or drop-offs added on the calendar. No weekends
+            unless you choose them.
+          </p>
+          <WeekdayPicker allowed={state.allowedWeekdays} onToggle={toggleWeekday} />
+          <div className="row-between">
+            <button type="button" className="btn ghost" onClick={() => go(2)}>
+              Back
+            </button>
+            <button type="button" className="btn" onClick={finish}>
+              Finish setup
+            </button>
+          </div>
+        </section>
+      )}
+    </div>
+  )
+}
+
+function Home({ state, navigate }) {
+  const [view, setView] = useState(() => startOfMonth(new Date()))
+  const today = new Date()
+  const weeks = useMemo(() => buildMonthGrid(view), [view])
+
+  return (
+    <div className="stack lg">
+      <div className="cal-head">
+        <div>
+          <h1>
+            {MONTHS[view.getMonth()]} {view.getFullYear()}
+          </h1>
+          <p className="muted">
+            {state.people.length
+              ? `Drivers: ${state.people.join(', ')}`
+              : 'No drivers yet — add people to start scheduling.'}
+          </p>
+        </div>
+        <div className="cal-nav">
+          <button
+            type="button"
+            className="iconbtn lg"
+            onClick={() => setView(addMonths(view, -1))}
+            aria-label="Previous month"
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            className="btn ghost sm"
+            onClick={() => setView(startOfMonth(new Date()))}
+          >
+            Today
+          </button>
+          <button
+            type="button"
+            className="iconbtn lg"
+            onClick={() => setView(addMonths(view, 1))}
+            aria-label="Next month"
+          >
+            ›
+          </button>
+        </div>
+      </div>
+
+      <div className="calendar">
+        <div className="cal-grid cal-weekdays">
+          {WEEK_ORDER.map((weekday) => (
+            <div key={weekday} className="cal-wd">
+              {WEEKDAY_LABELS[weekday]}
+            </div>
+          ))}
+        </div>
+        {weeks.map((week, index) => (
+          <div key={index} className="cal-grid">
+            {week.map((day) => {
+              const key = toKey(day)
+              const inMonth = day.getMonth() === view.getMonth()
+              const allowed = state.allowedWeekdays.includes(day.getDay())
+              const entry = state.entries[key]
+              const classes = ['cal-day']
+              if (!inMonth) classes.push('outside')
+              if (!allowed) classes.push('closed')
+              if (isSameDay(day, today)) classes.push('today')
+
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  className={classes.join(' ')}
+                  disabled={!allowed}
+                  onClick={() => navigate('date', { key })}
+                >
+                  <span className="cal-num">{day.getDate()}</span>
+                  {entry && (
+                    <span className="cal-slots">
+                      {RIDES.map((ride) => {
+                        const slot = entry[ride.key]
+                        if (!slot.time && slot.drivers.length === 0) return null
+                        return (
+                          <span
+                            key={ride.key}
+                            className={slot.drivers.length ? 'cal-slot covered' : 'cal-slot'}
+                          >
+                            {ride.glyph} {slot.time ? formatTime(slot.time) : 'needs time'}
+                            {slot.drivers.length ? ` · ${slot.drivers.join(', ')}` : ''}
+                          </span>
+                        )
+                      })}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        ))}
+      </div>
+
+      <p className="legend">
+        <span className="dot" /> covered &nbsp;·&nbsp; ↑ pickup &nbsp;·&nbsp; ↓ drop-off &nbsp;·&nbsp;
+        tap any day to edit
+      </p>
+    </div>
+  )
+}
+
+function DateDetail({ state, navigate, dateKey, toggleDriver, setRideTime, clearDay, toggleWeekday }) {
+  const date = fromKey(dateKey)
+  const allowed = state.allowedWeekdays.includes(date.getDay())
+  const entry = state.entries[dateKey] || emptyEntry()
+  const heading = date.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  })
+  const hasAnything = !isEmptyEntry(entry)
+
+  return (
+    <div className="stack lg">
+      <button type="button" className="btn ghost sm back" onClick={() => navigate('home')}>
+        ‹ Calendar
+      </button>
+      <h1>{heading}</h1>
+
+      {!allowed && (
+        <div className="notice">
+          <span>This weekday isn&apos;t part of your schedule yet.</span>
+          <button
+            type="button"
+            className="btn ghost sm"
+            onClick={() => toggleWeekday(date.getDay())}
+          >
+            Add {date.toLocaleDateString('en-US', { weekday: 'long' })}s
+          </button>
+        </div>
+      )}
+
+      {state.people.length === 0 ? (
+        <div className="card stack">
+          <p className="muted">Add people before you can assign drivers.</p>
+          <div className="row-end">
+            <button type="button" className="btn" onClick={() => navigate('people')}>
+              Go to People
+            </button>
+          </div>
+        </div>
+      ) : (
+        RIDES.map((ride) => {
+          const slot = entry[ride.key]
+          const options = ride.key === 'pickup' ? state.pickupTimes : state.dropoffTimes
+          const customValue = options.includes(slot.time) ? '' : slot.time
+          return (
+            <section key={ride.key} className="card stack">
+              <h2>
+                {ride.glyph} {ride.label}
+              </h2>
+
+              <div className="stack sm">
+                <span className="field-label">Time</span>
+                <div className="choice-row">
+                  {options.map((time) => (
+                    <button
+                      key={time}
+                      type="button"
+                      className={slot.time === time ? 'toggle on' : 'toggle'}
+                      onClick={() =>
+                        setRideTime(dateKey, ride.key, slot.time === time ? '' : time)
+                      }
+                    >
+                      {formatTime(time)}
+                    </button>
+                  ))}
+                  <label className="custom-time">
+                    <span>Custom</span>
+                    <input
+                      type="time"
+                      value={customValue}
+                      onChange={(event) => setRideTime(dateKey, ride.key, event.target.value)}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="stack sm">
+                <span className="field-label">Who&apos;s driving</span>
+                <div className="choice-row">
+                  {state.people.map((person) => (
+                    <button
+                      key={person}
+                      type="button"
+                      className={slot.drivers.includes(person) ? 'toggle on' : 'toggle'}
+                      onClick={() => toggleDriver(dateKey, ride.key, person)}
+                    >
+                      {person}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </section>
+          )
+        })
+      )}
+
+      <div className="row-between">
+        <button
+          type="button"
+          className="btn ghost sm"
+          disabled={!hasAnything}
+          onClick={() => clearDay(dateKey)}
+        >
+          Clear day
+        </button>
+        <button type="button" className="btn" onClick={() => navigate('home')}>
+          Save
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function People({ state, addPerson, removePerson }) {
+  return (
+    <div className="stack lg">
+      <h1>People</h1>
+      <p className="muted">
+        These are the drivers TANDEM offers when you open a day on the calendar.
+      </p>
+      <section className="card">
+        <PeopleField people={state.people} onAdd={addPerson} onRemove={removePerson} />
+      </section>
+    </div>
+  )
+}
+
+function Settings({ state, navigate, patch, setTimes, toggleWeekday }) {
+  const resetAll = () => {
+    if (window.confirm('Reset all TANDEM data? People, times, and scheduled days will be cleared.')) {
+      patch({ ...defaultState, onboarded: true })
+    }
+  }
+
+  return (
+    <div className="stack lg">
+      <h1>Settings</h1>
+      <p className="muted">Changes here take effect on the calendar right away.</p>
+
+      <section className="card">
+        <TimeEditor
+          label="Pickup times"
+          times={state.pickupTimes}
+          onChange={(times) => setTimes('pickupTimes', times)}
+        />
+      </section>
+
+      <section className="card">
+        <TimeEditor
+          label="Drop-off times"
+          times={state.dropoffTimes}
+          onChange={(times) => setTimes('dropoffTimes', times)}
+        />
+      </section>
+
+      <section className="card stack">
+        <h3>Schedulable days</h3>
+        <p className="muted">
+          Only these weekdays can have rides added. Turn a day off and it becomes read-only on the
+          calendar.
+        </p>
+        <WeekdayPicker allowed={state.allowedWeekdays} onToggle={toggleWeekday} />
+      </section>
+
+      <section className="card stack">
+        <h3>People</h3>
+        <p className="muted">Add or remove carpool drivers on the People page.</p>
+        <div className="row-end">
+          <button type="button" className="btn ghost sm" onClick={() => navigate('people')}>
+            Open People
+          </button>
+        </div>
+      </section>
+
+      <section className="card stack">
+        <h3>Reset</h3>
+        <p className="muted">Start over with an empty carpool.</p>
+        <div className="row-end">
+          <button type="button" className="btn danger sm" onClick={resetAll}>
+            Reset everything
+          </button>
+        </div>
+      </section>
+    </div>
+  )
+}
