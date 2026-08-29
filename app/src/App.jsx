@@ -6,12 +6,9 @@ import {
   defaultState,
   normalizeEntries,
   uid,
-<<<<<<< HEAD
   generateRoomCode,
-=======
   publishSyncState,
   subscribeToSync,
->>>>>>> parent of be897a5 (v8)
 } from './storage'
 import { makeShareCode, makeShareLink, parseShareInput } from './share'
 import {
@@ -48,12 +45,9 @@ export default function App() {
     state.onboarded ? { name: 'home', params: {} } : { name: 'onboarding', params: { step: 0 } },
   )
   const [pendingJoin, setPendingJoin] = useState(null)
-<<<<<<< HEAD
   const socketRef = useRef(null)
   const lastBroadcastRef = useRef('')
-=======
   const lastSyncedRef = useRef('')
->>>>>>> parent of be897a5 (v8)
 
   useEffect(() => {
     saveState(state)
@@ -61,56 +55,6 @@ export default function App() {
   }, [state])
 
   useEffect(() => {
-<<<<<<< HEAD
-    const roomCode = state.roomCode || generateRoomCode()
-    if (!state.roomCode) {
-      setState((current) => ({ ...current, roomCode }))
-      return
-    }
-
-    const serverUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-      ? 'http://localhost:3001'
-      : `http://${window.location.hostname}:3001`
-
-    if (!socketRef.current) {
-      socketRef.current = io(serverUrl, { transports: ['websocket'] })
-    }
-
-    const socket = socketRef.current
-    const joinHandler = (incoming) => {
-      if (!incoming || typeof incoming !== 'object') return
-      const incomingCode = makeShareCode(incoming)
-      if (!incomingCode || incomingCode !== roomCode) return
-
-      setState((current) => {
-        const next = { ...incoming, roomCode: current.roomCode || roomCode }
-        const currentValue = JSON.stringify(current)
-        const nextValue = JSON.stringify(next)
-        if (currentValue === nextValue) return current
-        lastBroadcastRef.current = nextValue
-        return next
-      })
-    }
-
-    socket.emit('join-room', roomCode)
-    socket.on('state:update', joinHandler)
-
-    return () => {
-      socket.off('state:update', joinHandler)
-    }
-  }, [state.roomCode])
-
-  useEffect(() => {
-    const socket = socketRef.current
-    if (!socket || !state.roomCode) return
-
-    const payload = { ...state, roomCode: state.roomCode }
-    const payloadValue = JSON.stringify(payload)
-    if (payloadValue === lastBroadcastRef.current) return
-
-    lastBroadcastRef.current = payloadValue
-    socket.emit('state:update', { code: state.roomCode, state: payload })
-=======
     const stop = subscribeToSync((incoming) => {
       if (!incoming) return
       const currentCode = makeShareCode(state)
@@ -122,7 +66,6 @@ export default function App() {
       setState(incoming)
     })
     return stop
->>>>>>> parent of be897a5 (v8)
   }, [state])
 
   useEffect(() => {
