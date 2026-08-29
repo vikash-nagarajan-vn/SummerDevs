@@ -18,6 +18,7 @@ const fromBase64Url = (value) => {
 
 export const makeShareCode = (state) => {
   if (!state || typeof state !== 'object') return ''
+  if (state.roomCode) return String(state.roomCode)
   const payload = {
     v: 1,
     people: state.people,

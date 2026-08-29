@@ -3,6 +3,15 @@ import { makeShareCode } from './share'
 const KEY = 'tandem.v1'
 const SYNC_CHANNEL = 'tandem.sync.v1'
 
+export const generateRoomCode = () => {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  let code = ''
+  for (let index = 0; index < 6; index += 1) {
+    code += alphabet[Math.floor(Math.random() * alphabet.length)]
+  }
+  return code
+}
+
 export const uid = () => {
   if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
     return globalThis.crypto.randomUUID()
@@ -11,6 +20,7 @@ export const uid = () => {
 }
 
 export const defaultState = {
+  roomCode: generateRoomCode(),
   onboarded: false,
   people: [],
   // Time options are stored as 24h "HH:MM" strings and formatted for display.
@@ -60,12 +70,14 @@ export const normalizeEntries = (raw) => {
 export const loadState = () => {
   try {
     const raw = localStorage.getItem(KEY)
-    if (!raw) return { ...defaultState }
-    const merged = { ...defaultState, ...JSON.parse(raw) }
+    const fallback = { ...defaultState, roomCode: generateRoomCode() }
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw)
+    const merged = { ...fallback, ...parsed, roomCode: parsed?.roomCode || fallback.roomCode }
     merged.entries = normalizeEntries(merged.entries)
     return merged
   } catch {
-    return { ...defaultState }
+    return { ...defaultState, roomCode: generateRoomCode() }
   }
 }
 

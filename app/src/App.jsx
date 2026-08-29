@@ -7,6 +7,7 @@ import {
   defaultState,
   normalizeEntries,
   uid,
+  generateRoomCode,
 } from './storage'
 import { makeShareCode, makeShareLink, parseShareInput } from './share'
 import {
@@ -44,48 +45,61 @@ export default function App() {
   )
   const [pendingJoin, setPendingJoin] = useState(null)
   const socketRef = useRef(null)
-  const lastCodeRef = useRef('')
+  const lastBroadcastRef = useRef('')
 
   useEffect(() => {
     saveState(state)
   }, [state])
 
   useEffect(() => {
-    const code = makeShareCode(state)
-    if (!code) return
+    const roomCode = state.roomCode || generateRoomCode()
+    if (!state.roomCode) {
+      setState((current) => ({ ...current, roomCode }))
+      return
+    }
+
+    const serverUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+      ? 'http://localhost:3001'
+      : `http://${window.location.hostname}:3001`
 
     if (!socketRef.current) {
-      socketRef.current = io('http://localhost:3001', { transports: ['websocket'] })
+      socketRef.current = io(serverUrl, { transports: ['websocket'] })
     }
 
     const socket = socketRef.current
-    const room = code
-    lastCodeRef.current = room
-    socket.emit('join-room', room)
-
-    socket.on('state:update', (incoming) => {
+    const joinHandler = (incoming) => {
+      if (!incoming || typeof incoming !== 'object') return
       const incomingCode = makeShareCode(incoming)
-      if (!incomingCode || incomingCode !== code) return
+      if (!incomingCode || incomingCode !== roomCode) return
+
       setState((current) => {
-        const next = JSON.stringify(current)
-        const incomingValue = JSON.stringify(incoming)
-        return next === incomingValue ? current : incoming
+        const next = { ...incoming, roomCode: current.roomCode || roomCode }
+        const currentValue = JSON.stringify(current)
+        const nextValue = JSON.stringify(next)
+        if (currentValue === nextValue) return current
+        lastBroadcastRef.current = nextValue
+        return next
       })
-    })
+    }
+
+    socket.emit('join-room', roomCode)
+    socket.on('state:update', joinHandler)
 
     return () => {
-      socket.off('state:update')
+      socket.off('state:update', joinHandler)
     }
-  }, [state])
+  }, [state.roomCode])
 
   useEffect(() => {
     const socket = socketRef.current
-    if (!socket) return
+    if (!socket || !state.roomCode) return
 
-    const code = makeShareCode(state)
-    if (!code) return
+    const payload = { ...state, roomCode: state.roomCode }
+    const payloadValue = JSON.stringify(payload)
+    if (payloadValue === lastBroadcastRef.current) return
 
-    socket.emit('state:update', { code, state })
+    lastBroadcastRef.current = payloadValue
+    socket.emit('state:update', { code: state.roomCode, state: payload })
   }, [state])
 
   useEffect(() => {
@@ -119,8 +133,10 @@ export default function App() {
   }
 
   const applyJoin = (data) => {
+    const roomCode = data.roomCode || makeShareCode(data) || generateRoomCode()
     setState((current) => ({
       ...current,
+      roomCode,
       people: Array.isArray(data.people) ? data.people : current.people,
       pickupTimes: Array.isArray(data.pickupTimes) ? data.pickupTimes : current.pickupTimes,
       dropoffTimes: Array.isArray(data.dropoffTimes) ? data.dropoffTimes : current.dropoffTimes,
